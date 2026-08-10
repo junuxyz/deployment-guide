@@ -6,22 +6,28 @@ This document defines the architectural goals, experimental matrix, and deep-div
 
 ## 1. Goal Overview
 
-The primary goal is to evaluate and compare **three progressive Prefill/Decode (P/D) disaggregation architectures** to identify the optimal serving setup for long-context, agentic, and high-concurrency workloads.
+The primary goal is to evaluate and compare **four progressive serving architectures**, from aggregated/colocated serving to Prefill/Decode (P/D) disaggregation, to identify the optimal setup for long-context, agentic, and high-concurrency workloads.
 
-Instead of running a monolithic model, we disaggregate serving across nodes:
+For the P/D experiments, we disaggregate serving across nodes:
 * **`gpu05` (8x H100):** Dedicated Prefill Node (4 Replicas @ TP=2)
 * **`gpu06` (8x H100):** Dedicated Decode Node (4 Replicas @ TP=2)
 
 ---
 
-## 2. Experimental Matrix: The 3 Experiments Under Test
+## 2. Experimental Matrix: The 4 Experiments Under Test
 
-We execute three structured experiments, building capabilities incrementally from a control baseline to full event-driven routing and multi-tier memory offloading.
+We execute four structured experiments, building capabilities incrementally from an aggregated control baseline to full event-driven routing and multi-tier memory offloading.
 
 ```
 +-----------------------------------------------------------------------------------+
+| Experiment 0: Aggregated / Colocated Serving                                      |
+| Prefill + Decode on the Same Workers | Round-Robin Routing                        |
++-----------------------------------------------------------------------------------+
+                                          |
+                                          v
++-----------------------------------------------------------------------------------+
 | Experiment 1: Baseline P/D Disaggregation                                         |
-| 4 Prefill (gpu05) + 4 Decode (gpu06) | Round-Robin Routing | No KV Events/Offload   |
+| 4 Prefill (gpu05) + 4 Decode (gpu06) | Round-Robin Routing | No KV Events/Offload |
 +-----------------------------------------------------------------------------------+
                                           |
                                           v
@@ -33,11 +39,17 @@ We execute three structured experiments, building capabilities incrementally fro
                                           v
 +-----------------------------------------------------------------------------------+
 | Experiment 3: P/D + KV-Aware Routing + SGLang HiCache (Host RAM Offload)          |
-| Multi-tier KV Cache (HBM L1 -> Pinned Host RAM L2) | Write-Through Policy          |
+| Multi-tier KV Cache (HBM L1 -> Pinned Host RAM L2) | Write-Through Policy         |
 +-----------------------------------------------------------------------------------+
 ```
 
-### Experiment 1: Baseline P/D Disaggregation (Control)
+### Experiment 0: Aggregated / Colocated Serving + Round-Robin (Control)
+* **Objective:** Establish the aggregated serving baseline before separating prefill and decode workers.
+* **Topology:** Prefill and decode execute on the same colocated worker replicas across the cluster.
+* **Routing:** Frontend naive round-robin.
+* **Cache State:** Local GPU HBM only; no KV-event-aware routing or host offloading.
+
+### Experiment 1: Baseline P/D Disaggregation
 * **Objective:** Establish baseline P/D disaggregation latency and throughput without cache awareness.
 * **Topology:** 4 Prefill replicas on `gpu05` (TP=2) + 4 Decode replicas on `gpu06` (TP=2).
 * **Transport:** NVIDIA NIXL (Inter-process eXchange Library) over UCX / GPUDirect RDMA.
@@ -73,7 +85,7 @@ Agentic workloads feature multi-turn conversations, tool-calling loops, system p
 * **What We Benchmark:** 
   * Re-use latency of shared system prompts and tool definition schemas.
   * Multi-turn chat completion latency degradation over 4–16 turn conversations.
-  * Turn-by-turn Time-to-First-Token (TTFT) acceleration under KV-aware routing (Exp 2 & Exp 3 vs Exp 1).
+  * Turn-by-turn Time-to-First-Token (TTFT) across aggregated serving, baseline P/D, and KV-aware routing (Exp 0–3).
 
 ### B. Context Awareness & Prefix Cache Hit Rate
 * **What We Benchmark:**
@@ -116,22 +128,23 @@ We use an enterprise-grade, deterministic benchmarking stack to ensure reproduci
 
 ## 5. Comparative Evaluation Matrix
 
-Upon completing all three experiment runs, results will be compiled into the following comparative format:
+Upon completing all four experiment runs, results will be compiled into the following comparative format:
 
-| Metric | Exp 1: Baseline P/D | Exp 2: KV-Aware Routing | Exp 3: KV-Aware + HiCache |
-|---|---|---|---|
-| **Prefix Cache Hit Rate (%)** | N/A (Round-Robin) | High (ZMQ-driven) | Highest (HBM + Host RAM) |
-| **P95 TTFT (Shared Prefix)** | Baseline | Reduced by ~60–80% | Reduced under heavy load |
-| **P95 ITL (Decode Speed)** | Baseline | Same | Same |
-| **Max SLO Goodput (Req/sec)** | Baseline | Higher under repeat prompts | Highest at high concurrency |
-| **GPU HBM Memory (Prefill)** | ~82% limit | ~82% limit | ~82% HBM + 2x Host RAM |
-| **Host System Memory Usage** | Minimal | Minimal | Heavy (Pinned Host KV Pool) |
+| Metric | Exp 0: Aggregated + RR | Exp 1: Baseline P/D | Exp 2: KV-Aware Routing | Exp 3: KV-Aware + HiCache |
+|---|---|---|---|---|
+| **Prefix Cache Hit Rate (%)** | N/A (Round-Robin) | N/A (Round-Robin) | High (ZMQ-driven) | Highest (HBM + Host RAM) |
+| **P95 TTFT (Shared Prefix)** | Aggregated baseline | P/D baseline | Reduced by ~60–80% | Reduced under heavy load |
+| **P95 ITL (Decode Speed)** | Aggregated baseline | P/D baseline | Same | Same |
+| **Max SLO Goodput (Req/sec)** | Aggregated baseline | P/D baseline | Higher under repeat prompts | Highest at high concurrency |
+| **GPU HBM Memory (Prefill)** | Shared prefill/decode pool | ~82% limit | ~82% limit | ~82% HBM + 2x Host RAM |
+| **Host System Memory Usage** | Minimal | Minimal | Minimal | Heavy (Pinned Host KV Pool) |
 
 ---
 
 ## 6. Execution Instructions
 
 Refer to individual experiment guides in `models/qwen3-32B/experiments/` for step-by-step launch commands:
+* [`00-aggregated-colocated-serving.md`](experiments/00-aggregated-colocated-serving.md)
 * [`01-pd-disaggregation.md`](experiments/01-pd-disaggregation.md)
 * [`02-pd-kv-aware-routing.md`](experiments/02-pd-kv-aware-routing.md)
 * [`03-pd-kv-aware-routing-kv-offloading.md`](experiments/03-pd-kv-aware-routing-kv-offloading.md)

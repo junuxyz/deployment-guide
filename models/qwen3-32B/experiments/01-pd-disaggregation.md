@@ -474,7 +474,7 @@ they are prerequisites for experiments 2 and 3.
 - NIXL bootstrap timeout: verify pod-to-pod networking, HCA state, RDMA device
   exposure, and firewall rules between the two private nodes.
 - OOM during bring-up: collect pod logs and node RAM/HBM use. Do not silently
-  change `mem-fraction-static`, because it must remain identical in all three
+  change `mem-fraction-static`, because it must remain identical in all four
   experiments.
 
 ## References
