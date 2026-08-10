@@ -1,6 +1,6 @@
-# Goal & Benchmarking Specification: Qwen 32B Disaggregated Serving
+# Goal & Benchmarking Specification: Qwen3-32B-FP8 Disaggregated Serving
 
-This document defines the architectural goals, experimental matrix, and deep-dive benchmarking methodology for **Qwen 32B** (`Qwen/Qwen2.5-32B-Instruct`) deployed on a 2-node 8xH100 cluster (`gpu05` and `gpu06`) using NVIDIA Dynamo v1.3.0 with SGLang backend.
+This document defines the architectural goals, experimental matrix, and deep-dive benchmarking methodology for **Qwen3-32B-FP8** (`Qwen/Qwen3-32B-FP8`) deployed on a 2-node 8xH100 cluster (`gpu05` and `gpu06`) using NVIDIA Dynamo v1.3.0 with SGLang backend.
 
 ---
 
