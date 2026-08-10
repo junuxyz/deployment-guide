@@ -6,7 +6,7 @@ This document defines the architectural goals, experimental matrix, and deep-div
 
 ## 1. Goal Overview
 
-The primary goal is to evaluate and compare **three progressive Prefill/Decode (P/D) disaggregation architectures** to identify the optimal serving setup for long-context, agentic, and high-concurrency workloads.
+The primary goal is to evaluate and compare **five progressive Prefill/Decode (P/D) disaggregation architectures** to identify the optimal serving setup for long-context, agentic, and high-concurrency workloads.
 
 Instead of running a monolithic model, we disaggregate serving across nodes:
 * **`gpu05` (8x H100):** Dedicated Prefill Node (4 Replicas @ TP=2)
@@ -14,9 +14,10 @@ Instead of running a monolithic model, we disaggregate serving across nodes:
 
 ---
 
-## 2. Experimental Matrix: The 3 Experiments Under Test
+## 2. Experimental Matrix: The 5 Experiments Under Test
 
-We execute three structured experiments, building capabilities incrementally from a control baseline to full event-driven routing and multi-tier memory offloading.
+We execute five structured experiments: a control, two prefill-heavy placement
+variants, KV-aware routing, and KV-aware routing with host-memory offloading.
 
 ```
 +-----------------------------------------------------------------------------------+
@@ -26,34 +27,55 @@ We execute three structured experiments, building capabilities incrementally fro
                                           |
                                           v
 +-----------------------------------------------------------------------------------+
-| Experiment 2: P/D + Event-Driven KV-Aware Routing                                 |
+| Experiment 2: Asymmetric Prefill-Heavy P6/D2                                      |
+| gpu05: 4P | gpu06: 2P + 2D | Round-Robin | No KV Events/Offload                   |
++-----------------------------------------------------------------------------------+
+                                          |
+                                          v
++-----------------------------------------------------------------------------------+
+| Experiment 3: Balanced Prefill-Heavy P6/D2                                        |
+| gpu05: 3P + 1D | gpu06: 3P + 1D | Round-Robin | No KV Events/Offload              |
++-----------------------------------------------------------------------------------+
+                                          |
+                                          v
++-----------------------------------------------------------------------------------+
+| Experiment 4: P/D + Event-Driven KV-Aware Routing                                 |
 | ZMQ Event Bus | DYN_ROUTER_MODE=kv | Prefix-Cache Aware Request Steering          |
 +-----------------------------------------------------------------------------------+
                                           |
                                           v
 +-----------------------------------------------------------------------------------+
-| Experiment 3: P/D + KV-Aware Routing + SGLang HiCache (Host RAM Offload)          |
+| Experiment 5: P/D + KV-Aware Routing + SGLang HiCache (Host RAM Offload)          |
 | Multi-tier KV Cache (HBM L1 -> Pinned Host RAM L2) | Write-Through Policy          |
 +-----------------------------------------------------------------------------------+
 ```
 
 ### Experiment 1: Baseline P/D Disaggregation (Control)
-* **Objective:** Establish baseline P/D disaggregation latency and throughput without cache awareness.
-* **Topology:** 4 Prefill replicas on `gpu05` (TP=2) + 4 Decode replicas on `gpu06` (TP=2).
-* **Transport:** NVIDIA NIXL (Inter-process eXchange Library) over UCX / GPUDirect RDMA.
-* **Routing:** Frontend naive round-robin.
-* **Cache State:** Local GPU HBM only; no event publishing or offloading.
+- **Objective:** Establish baseline P/D disaggregation latency and throughput without cache awareness.
+- **Topology:** 4 Prefill replicas on `gpu05` (TP=2) + 4 Decode replicas on `gpu06` (TP=2).
+- **Transport:** NVIDIA NIXL (Inter-process eXchange Library) over UCX / GPUDirect RDMA.
+- **Routing:** Frontend naive round-robin.
+- **Cache State:** Local GPU HBM only; no event publishing or offloading.
 
-### Experiment 2: P/D Disaggregation + KV-Aware Routing
-* **Objective:** Evaluate prefix-cache reuse gains under multi-turn agentic traffic.
-* **Configuration Changes:** 
-  * Frontend enables `DYN_ROUTER_MODE=kv` and `DYN_ROUTER_USE_KV_EVENTS=true`.
-  * SGLang workers publish ZMQ events over port 5557 when KV blocks are computed/freed.
-* **Routing Logic:** Requests sharing prompt prefixes (e.g. system prompts, agent instructions) are routed to prefill workers already holding cached KV blocks.
+### Experiment 2: Asymmetric prefill-heavy P6/D2 allocation
+- **Objective:** Measure 6P/2D while preserving a decode-free prefill node.
+- **Topology:** 4P on `gpu05`; 2P + 2D on `gpu06`.
 
-### Experiment 3: P/D + KV-Aware Routing + SGLang HiCache (Host KV Offloading)
-* **Objective:** Expand KV cache capacity beyond GPU HBM limits using host CPU DRAM to prevent KV cache evictions under high concurrency.
-* **Configuration Changes:** Prefill workers enable SGLang HiCache:
+### Experiment 3: Balanced prefill-heavy P6/D2 allocation
+- **Objective:** Measure the same 6P/2D allocation with balanced node load and
+  compare placement against experiment 2.
+- **Topology:** 3P + 1D on each node.
+
+### Experiment 4: P/D Disaggregation + KV-Aware Routing
+- **Objective:** Evaluate prefix-cache reuse gains under multi-turn agentic traffic.
+- **Configuration Changes:**
+  - Frontend enables `DYN_ROUTER_MODE=kv` and `DYN_ROUTER_USE_KV_EVENTS=true`.
+  - SGLang workers publish ZMQ events over port 5557 when KV blocks are computed/freed.
+- **Routing Logic:** Requests sharing prompt prefixes (e.g. system prompts, agent instructions) are routed to prefill workers already holding cached KV blocks.
+
+### Experiment 5: P/D + KV-Aware Routing + SGLang HiCache (Host KV Offloading)
+- **Objective:** Expand KV cache capacity beyond GPU HBM limits using host CPU DRAM to prevent KV cache evictions under high concurrency.
+- **Configuration Changes:** Prefill workers enable SGLang HiCache:
   ```text
   --enable-hierarchical-cache
   --hicache-ratio 2
@@ -70,31 +92,31 @@ Our benchmarking suite evaluates performance across five critical dimensions:
 
 ### A. Agentic Workflow Performance
 Agentic workloads feature multi-turn conversations, tool-calling loops, system prompt reuse, and iterative chain-of-thought expansion.
-* **What We Benchmark:** 
-  * Re-use latency of shared system prompts and tool definition schemas.
-  * Multi-turn chat completion latency degradation over 4–16 turn conversations.
-  * Turn-by-turn Time-to-First-Token (TTFT) acceleration under KV-aware routing (Exp 2 & Exp 3 vs Exp 1).
+- **What We Benchmark:**
+  - Re-use latency of shared system prompts and tool definition schemas.
+  - Multi-turn chat completion latency degradation over 4–16 turn conversations.
+  - Turn-by-turn Time-to-First-Token (TTFT) acceleration under KV-aware routing (Exp 4 & Exp 5 vs Exp 1).
 
 ### B. Context Awareness & Prefix Cache Hit Rate
-* **What We Benchmark:**
-  * **Cache Hit Ratio (%):** Percentage of prompt tokens served directly from pre-computed KV blocks.
-  * **TTFT vs. Prefix Overlap:** TTFT reduction as prompt prefix overlap increases (0%, 25%, 50%, 75%, 90% overlap).
-  * **Inter-Node KV Transfer Overhead:** Time required by NIXL to transfer prefill KV states to decode workers over RDMA.
+- **What We Benchmark:**
+  - **Cache Hit Ratio (%):** Percentage of prompt tokens served directly from pre-computed KV blocks.
+  - **TTFT vs. Prefix Overlap:** TTFT reduction as prompt prefix overlap increases (0%, 25%, 50%, 75%, 90% overlap).
+  - **Inter-Node KV Transfer Overhead:** Time required by NIXL to transfer prefill KV states to decode workers over RDMA.
 
 ### C. GPU & Host Resource Utilization
-* **What We Benchmark:**
-  * **VRAM Occupancy & HBM Usage:** GPU memory allocation per rank under varying batch sizes.
-  * **Host RAM Allocation (HiCache):** Memory footprint and allocation stability on `gpu05` under `--hicache-ratio 2`.
-  * **Streaming Compute Utilization (SM %):** GPU SM activity during heavy prefill bursts vs continuous decode generation.
-  * **Interconnect Bandwidth:** RDMA throughput over the `10.18.96.x` fabric network during peak NIXL KV transfers.
+- **What We Benchmark:**
+  - **VRAM Occupancy & HBM Usage:** GPU memory allocation per rank under varying batch sizes.
+  - **Host RAM Allocation (HiCache):** Memory footprint and allocation stability on `gpu05` under `--hicache-ratio 2`.
+  - **Streaming Compute Utilization (SM %):** GPU SM activity during heavy prefill bursts vs continuous decode generation.
+  - **Interconnect Bandwidth:** RDMA throughput over the `10.18.96.x` fabric network during peak NIXL KV transfers.
 
 ### D. Concurrency Scaling & SLO-Bound Goodput
-* **What We Benchmark:**
-  * **Concurrency Sweeps:** Load testing across 1, 8, 16, 32, 64, 128, and 256 concurrent client streams.
-  * **SLO Goodput (Requests/sec):** Maximum request rate achieved while satisfying strict Service Level Objectives:
-    * **P95 TTFT:** `< 1,000 ms`
-    * **P95 Inter-Token Latency (ITL):** `< 50 ms`
-    * **Error Rate:** `< 0.1%`
+- **What We Benchmark:**
+  - **Concurrency Sweeps:** Load testing across 1, 8, 16, 32, 64, 128, and 256 concurrent client streams.
+  - **SLO Goodput (Requests/sec):** Maximum request rate achieved while satisfying strict Service Level Objectives:
+    - **P95 TTFT:** `< 1,000 ms`
+    - **P95 Inter-Token Latency (ITL):** `< 50 ms`
+    - **Error Rate:** `< 0.1%`
 
 ---
 
@@ -116,22 +138,25 @@ We use an enterprise-grade, deterministic benchmarking stack to ensure reproduci
 
 ## 5. Comparative Evaluation Matrix
 
-Upon completing all three experiment runs, results will be compiled into the following comparative format:
+Upon completing the five configured experiments, results will be compiled into
+the following comparative format:
 
-| Metric | Exp 1: Baseline P/D | Exp 2: KV-Aware Routing | Exp 3: KV-Aware + HiCache |
-|---|---|---|---|
-| **Prefix Cache Hit Rate (%)** | N/A (Round-Robin) | High (ZMQ-driven) | Highest (HBM + Host RAM) |
-| **P95 TTFT (Shared Prefix)** | Baseline | Reduced by ~60–80% | Reduced under heavy load |
-| **P95 ITL (Decode Speed)** | Baseline | Same | Same |
-| **Max SLO Goodput (Req/sec)** | Baseline | Higher under repeat prompts | Highest at high concurrency |
-| **GPU HBM Memory (Prefill)** | ~82% limit | ~82% limit | ~82% HBM + 2x Host RAM |
-| **Host System Memory Usage** | Minimal | Minimal | Heavy (Pinned Host KV Pool) |
+| Metric | Exp 1: Baseline P/D | Exp 2: Asymmetric | Exp 3: Balanced | Exp 4: KV-Aware Routing | Exp 5: KV-Aware + HiCache |
+|---|---|---|---|---|---|
+| **Prefix Cache Hit Rate (%)** | N/A (Round-Robin) | N/A (Round-Robin) | N/A (Round-Robin) | High (ZMQ-driven) | Highest (HBM + Host RAM) |
+| **P95 TTFT (Shared Prefix)** | Baseline | Measure under prefill-heavy load | Measure under prefill-heavy load | Reduced by ~60–80% | Reduced under heavy load |
+| **P95 ITL (Decode Speed)** | Baseline | Measure concentrated decode pressure | Measure distributed decode pressure | Same | Same |
+| **Max SLO Goodput (Req/sec)** | Baseline | Screen, then sweep if material | Primary full sweep | Higher under repeat prompts | Highest at high concurrency |
+| **GPU HBM Memory (Prefill)** | ~82% limit | ~82% limit | ~82% limit | ~82% limit | ~82% HBM + 2x Host RAM |
+| **Host System Memory Usage** | Minimal | Minimal | Minimal | Minimal | Heavy (Pinned Host KV Pool) |
 
 ---
 
 ## 6. Execution Instructions
 
 Refer to individual experiment guides in `models/qwen3-32B/experiments/` for step-by-step launch commands:
-* [`01-pd-disaggregation.md`](experiments/01-pd-disaggregation.md)
-* [`02-pd-kv-aware-routing.md`](experiments/02-pd-kv-aware-routing.md)
-* [`03-pd-kv-aware-routing-kv-offloading.md`](experiments/03-pd-kv-aware-routing-kv-offloading.md)
+- [`01-pd-disaggregation.md`](experiments/01-pd-disaggregation.md)
+- [`02-pd-p6d2-asymmetric.md`](experiments/02-pd-p6d2-asymmetric.md)
+- [`03-pd-p6d2-balanced.md`](experiments/03-pd-p6d2-balanced.md)
+- [`04-pd-kv-aware-routing.md`](experiments/04-pd-kv-aware-routing.md)
+- [`05-pd-kv-aware-routing-kv-offloading.md`](experiments/05-pd-kv-aware-routing-kv-offloading.md)

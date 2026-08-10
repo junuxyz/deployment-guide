@@ -1,6 +1,6 @@
-# Experiment 3: P/D + KV-aware routing + KV offloading
+# Experiment 5: P/D + KV-aware routing + KV offloading
 
-This deployment keeps experiment 2 unchanged and adds SGLang HiCache on the
+This deployment keeps experiment 4 unchanged and adds SGLang HiCache on the
 prefill workers. The offload hierarchy under test is:
 
 ```text
@@ -12,9 +12,9 @@ decode-generated KV offload. Those require different backends and would be
 different experiments.
 
 Complete [the cluster setup](../setup.md) and validate
-[experiment 2](02-pd-kv-aware-routing.md) first.
+[experiment 4](04-pd-kv-aware-routing.md) first.
 
-## What changes from experiment 2
+## What changes from experiment 4
 
 Only prefill workers add:
 
@@ -27,7 +27,7 @@ Only prefill workers add:
 
 The frontend explicitly fixes the host-tier routing credit at its Dynamo 1.3.0
 default, `DYN_ROUTER_HOST_CACHE_HIT_WEIGHT=0.75`. Everything else remains the
-same as experiment 2.
+same as experiment 4.
 
 ## 1. Host-memory safety gate
 
@@ -56,7 +56,7 @@ headroom. If ratio 2 is too large, measure the GPU KV pool first and use
 `--hicache-size N` with a justified per-rank capacity greater than that pool.
 Do not guess `N`, and use the same value for every prefill replica.
 
-## 2. Confirm experiment 2 is stopped
+## 2. Confirm experiment 4 is stopped
 
 ```bash
 kubectl get dynamographdeployments -n "$NAMESPACE"
@@ -64,19 +64,19 @@ kubectl get pods -n "$NAMESPACE" -o wide
 kubectl get pvc model-cache -n "$NAMESPACE"
 ```
 
-Delete `qwen32-pd-kv` using experiment 2's shutdown steps if it remains. All 16
+Delete `qwen32-pd-kv` using experiment 4's shutdown steps if it remains. All 16
 GPUs must be free before continuing.
 
 ## 3. Create the deployment manifest
 
 Save the following as
-`/ephemeral/shared/qwen3-32b/manifests/03-pd-kv-aware-routing-kv-offloading.yaml`:
+`/ephemeral/shared/qwen3-32b/manifests/05-pd-kv-aware-routing-kv-offloading.yaml`:
 
 **Run on `gpu05` — Kubernetes admin terminal:** create the deployment file on
 the shared filesystem.
 
 ```bash
-tee /ephemeral/shared/qwen3-32b/manifests/03-pd-kv-aware-routing-kv-offloading.yaml >/dev/null <<'EOF'
+tee /ephemeral/shared/qwen3-32b/manifests/05-pd-kv-aware-routing-kv-offloading.yaml >/dev/null <<'EOF'
 apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeployment
 metadata:
@@ -373,7 +373,7 @@ watch -n 2 'free -h; nvidia-smi --query-gpu=index,memory.used --format=csv,nohea
 From the Kubernetes terminal:
 
 ```bash
-kubectl apply -f /ephemeral/shared/qwen3-32b/manifests/03-pd-kv-aware-routing-kv-offloading.yaml
+kubectl apply -f /ephemeral/shared/qwen3-32b/manifests/05-pd-kv-aware-routing-kv-offloading.yaml
 
 kubectl get pods -n "$NAMESPACE" \
   -l nvidia.com/dynamo-graph-deployment-name=qwen32-pd-kv-offload \
@@ -505,11 +505,11 @@ work.
 
 ## 7. Acceptance criteria
 
-Experiment 3 is deployment-ready only when:
+Experiment 5 is deployment-ready only when:
 
-- experiment 2 is fully stopped;
+- experiment 4 is fully stopped;
 - placement, model revision, TP, page size, worker count, and NIXL settings are
-  unchanged from experiment 2;
+  unchanged from experiment 4;
 - all nine pods remain Ready and `gpu05` retains safe available RAM;
 - each prefill worker reports an initialized HiCache host pool;
 - host total-token capacity is nonzero and used-token capacity grows under

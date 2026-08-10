@@ -1,4 +1,4 @@
-# Experiment 2: P/D disaggregation with KV-aware routing
+# Experiment 4: P/D disaggregation with KV-aware routing
 
 This deployment keeps experiment 1's model, 4P/4D TP=2 topology, GPU
 placement, NIXL/UCX transport, and memory settings unchanged. Its only feature
@@ -36,13 +36,13 @@ steps and wait until all of its experiment pods are gone.
 ## 2. Create the deployment manifest
 
 Save the following as
-`/ephemeral/shared/qwen3-32b/manifests/02-pd-kv-aware-routing.yaml`:
+`/ephemeral/shared/qwen3-32b/manifests/04-pd-kv-aware-routing.yaml`:
 
 **Run on `gpu05` — Kubernetes admin terminal:** create the deployment file on
 the shared filesystem.
 
 ```bash
-tee /ephemeral/shared/qwen3-32b/manifests/02-pd-kv-aware-routing.yaml >/dev/null <<'EOF'
+tee /ephemeral/shared/qwen3-32b/manifests/04-pd-kv-aware-routing.yaml >/dev/null <<'EOF'
 apiVersion: nvidia.com/v1beta1
 kind: DynamoGraphDeployment
 metadata:
@@ -318,7 +318,7 @@ overlap to the prefill choice and disables that assumption for decode.
 ## 3. Apply and verify placement
 
 ```bash
-kubectl apply -f /ephemeral/shared/qwen3-32b/manifests/02-pd-kv-aware-routing.yaml
+kubectl apply -f /ephemeral/shared/qwen3-32b/manifests/04-pd-kv-aware-routing.yaml
 
 kubectl get pods -n "$NAMESPACE" \
   -l nvidia.com/dynamo-graph-deployment-name=qwen32-pd-kv \
@@ -456,7 +456,7 @@ Require nonzero transfer activity and zero transfer/bootstrap failures.
 
 ## 7. Acceptance criteria
 
-Experiment 2 is deployment-ready only when:
+Experiment 4 is deployment-ready only when:
 
 - experiment 1 is fully stopped;
 - all nine pods are Ready with the same placement and GPU allocation as
@@ -482,7 +482,7 @@ kubectl wait --for=delete pod \
 kubectl get pods -n "$NAMESPACE" -o wide
 ```
 
-Keep the shared setup resources for experiment 3.
+Keep the shared setup resources for experiment 5.
 
 ## Troubleshooting boundary
 
