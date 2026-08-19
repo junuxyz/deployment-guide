@@ -27,7 +27,8 @@ This repository tracks LLM deployment experiments, setup runbooks, and benchmark
 | **Qwen3-32B FP8 KV-Aware Disaggregated** | vLLM / SGLang | Working | 16 | 6 prefill × TP=2 + 2 decode × TP=2 (KV-aware) | [vLLM](models/qwen3-32B/vllm/disagg-routing-kv-aware/README.md) / [SGLang](models/qwen3-32B/sglang/disagg-routing-kv-aware/README.md) |
 | **Qwen3.6-35B-A3B FP8 Aggregated** | SGLang | Working | 2–16 | 1–8 aggregated workers × TP=2 (KEDA autoscaling) | [Recipe](models/qwen3.6-35B-A3B/sglang/agg-autoscaling/README.md) |
 | **Qwen3.6-35B-A3B FP8 Disaggregated** | SGLang | Working | 16 | 4P+4D, TP=2, DP=2, EP=2 (CPU KV offload) | [Recipe](models/qwen3.6-35B-A3B/sglang/disagg/tp1-ep2-4p4d/README.md) |
-| **Qwen3-235B-A22B FP8** | SGLang | Working | 16 | 4 aggregated workers × TP=4 | [Recipe](models/qwen3-235B-A22B/sglang/agg/README.md) |
+| **Qwen3-235B-A22B FP8 (vLLM)** | vLLM | Working | 16 | 4 aggregated workers × TP=4 / 2 prefill + 2 decode workers × TP=4 | [Recipe](models/qwen3-235B-fp8/README.md) |
+| **Qwen3-235B-A22B FP8 (SGLang)** | SGLang | Working | 16 | 4 aggregated workers × TP=4 | [Recipe](models/qwen3-235B-A22B/sglang/agg/README.md) |
 | **GLM-5.2-FP8** | vLLM | Working | 16 | 1 two-node replica, TP=16 | [Recipe](models/glm-5.2-fp8/vllm/agg/README.md) |
 | **DeepSeek-V4-Flash FP8** | SGLang | Experimental | 16 | 2 aggregated workers × TP=8 | [Recipe](models/deepseek-v4-flash-fp8/sglang/agg/README.md) |
 
@@ -50,8 +51,6 @@ We only had one week of access to this 16x H100 cluster, so I'm incredibly glad 
 * **Parallelism Bottlenecks (TP / DP / EP)**: Analyzed cross-node network stalls (TP=16 across nodes) vs. EP/DP scalability.
 * **Event-Driven Autoscaling (KEDA)**: Dynamic pod scaling (1–8 workers) based on queue depth and GPU load metrics.
 * **NIXL RDMA Latency Profiling**: Measured KV transfer latency growth over RoCE v2 as context length scales. See the reusable [NIXL Prometheus and Grafana runbook](NIXL-grafana.md).
-
-We are currently processing and extracting all raw AIPerf benchmark artifacts, DCGM GPU utilization metrics, and Grafana performance dashboards. We'll be updating this section with full visual plots and benchmark graphs shortly!
 
 # The results
 
@@ -91,6 +90,28 @@ While we ran out of time to test separate autoscaling for disaggregated Prefill/
 
 ![KEDA autoscaling dashboard](assets/keda-autscaling.svg)
 
+### 4. Aggregated vs. Disaggregated Serving with Qwen3-32B FP8 (vLLM)
+
+We ran five Qwen3-32B FP8 configurations with vLLM to see how worker topology, routing, and KV-cache policy affect serving performance. Starting from eight aggregated TP=2 workers, we compared 6P2D and 4P4D disaggregation, then added KV-aware routing and CPU KV-cache offloading while keeping the model, workload, GPU count, and AIPerf SLO definitions aligned.
+
+The 4P4D setting with KV-aware configuration delivered the strongest observed balance of per-GPU output throughput, SLO-qualified goodput, and request pass rate.
+
+Note: Exp 5 is provisional because 201 requests returned no generated content.
+
+<p align="center">
+  <img src="assets/qwen3-32b-fp8/qwen3-32b-fp8-throughput-goodput.png" width="1000" />
+</p>
+
+<p align="center">
+  <img src="assets/qwen3-32b-fp8/qwen3-32b-fp8-slo-qualified-request-ratio.png" width="1000" />
+</p>
+
+The aggregated and 6P2D round-robin configurations developed very large TTFT tails, while the 4P4D KV-aware configuration had the largest share of requests within the SLO target.
+
+<p align="center">
+  <img src="assets/qwen3-32b-fp8/qwen3-32b-fp8-ttft-tail.png" width="1000" />
+</p>
+
 ## Repository Structure
 
 ```text
@@ -107,6 +128,7 @@ While we ran out of time to test separate autoscaling for disaggregated Prefill/
     ├── glm-5.2-fp8/
     ├── llama-8B/
     ├── qwen3-32B/
+    ├── qwen3-235B-fp8/
     ├── qwen3-235B-A22B/
     ├── qwen3.6-35B-A3B/
     └── qwen3.8-27B/
