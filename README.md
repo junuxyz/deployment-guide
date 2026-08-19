@@ -90,27 +90,26 @@ While we ran out of time to test separate autoscaling for disaggregated Prefill/
 
 ![KEDA autoscaling dashboard](assets/keda-autscaling.svg)
 
-### 4. Aggregated vs. Disaggregated Serving with Qwen3-32B FP8 (vLLM)
+### 4. Aggregated vs. Disaggregated Serving with Qwen3-32B-FP8 (vLLM)
 
-We ran five Qwen3-32B FP8 configurations with vLLM to see how worker topology, routing, and KV-cache policy affect serving performance. Starting from eight aggregated TP=2 workers, we compared 6P2D and 4P4D disaggregation, then added KV-aware routing and CPU KV-cache offloading while keeping the model, workload, GPU count, and AIPerf SLO definitions aligned.
-
-The 4P4D setting with KV-aware configuration delivered the strongest observed balance of per-GPU output throughput, SLO-qualified goodput, and request pass rate.
+We evaluated five Qwen3-32B FP8 configurations with vLLM using the [Mooncake conversation trace](https://github.com/kvcache-ai/Mooncake/blob/main/FAST25-release/traces/conversation_trace.jsonl). Starting from eight aggregated TP=2 workers, we compared 6P2D and 4P4D disaggregation, KV-aware routing, and CPU KV cache offloading.
 
 Note: Exp 5 is provisional because 201 requests returned no generated content.
 
 <p align="center">
-  <img src="assets/qwen3-32b-fp8/qwen3-32b-fp8-throughput-goodput.png" width="1000" />
+  <img src="assets/qwen3-32b-fp8/qwen3-32b-fp8-throughput-goodput-slo.png" width="1000" />
 </p>
 
-<p align="center">
-  <img src="assets/qwen3-32b-fp8/qwen3-32b-fp8-slo-qualified-request-ratio.png" width="1000" />
-</p>
+The 4P4D KV-aware configuration delivered the strongest goodput and SLO request pass rate. Analysis indicated that the workload was input-heavy but **decode-bound**—decode GPUs were saturated while prefill GPUs were underutilized. This is why 4P4D worked better than 6P2D. Also, since the trace used a fixed real-world arrival schedule rather than saturating the server, the benefit of KV-aware routing appeared primarily in goodput and latency rather than raw request throughput (Exp 3 vs Exp 4).
 
-The aggregated and 6P2D round-robin configurations developed very large TTFT tails, while the 4P4D KV-aware configuration had the largest share of requests within the SLO target.
+Exp 5 did not demonstrate a measurable benefit from CPU KV cache offloading. Although KV-aware routing was enabled, prompt cache reads decreased from 11.5% in Exp 4 to 7.4%. The available metrics was insufficient to isolate the cause. Therefore, we treat the Exp 5 result as inconclusive.
 
 <p align="center">
   <img src="assets/qwen3-32b-fp8/qwen3-32b-fp8-ttft-tail.png" width="1000" />
 </p>
+
+The aggregated and 6P2D round-robin configurations developed very large TTFT tails, while the 4P4D KV-aware configuration kept the largest share of requests within the SLO target.
+
 
 ## Repository Structure
 
